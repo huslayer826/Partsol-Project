@@ -2,7 +2,13 @@
 
 import { motion } from "framer-motion";
 import { Loader2 } from "lucide-react";
-import { useState, type FormEvent } from "react";
+import {
+  useEffect,
+  useRef,
+  useState,
+  type FormEvent,
+  type KeyboardEvent,
+} from "react";
 
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
@@ -26,14 +32,28 @@ function newId(): string {
   return `${Date.now()}-${Math.random().toString(36).slice(2)}`;
 }
 
-export function PredictForm() {
+interface PredictFormProps {
+  prefillText?: string | null;
+}
+
+export function PredictForm({ prefillText = null }: PredictFormProps) {
   const { toast } = useToast();
+  const formRef = useRef<HTMLFormElement>(null);
   const [text, setText] = useState("");
   const [loading, setLoading] = useState(false);
   const [, setError] = useState<string | null>(null);
   const [result, setResult] = useState<PredictResponse | null>(null);
   const [resultText, setResultText] = useState("");
   const [submissionId, setSubmissionId] = useState(0);
+
+  useEffect(() => {
+    if (prefillText !== null) {
+      setText(prefillText);
+      // Clear stale result so users see a fresh form ready to resubmit.
+      setResult(null);
+      setError(null);
+    }
+  }, [prefillText]);
 
   const charColor =
     text.length > MAX_CHARS
@@ -63,6 +83,9 @@ export function PredictForm() {
           prediction: top,
           inference_ms: response.inference_ms,
         });
+        if (typeof window !== "undefined") {
+          window.dispatchEvent(new Event("history-updated"));
+        }
       }
     } catch (err) {
       const message =
@@ -82,9 +105,18 @@ export function PredictForm() {
     }
   }
 
+  function onKeyDown(event: KeyboardEvent<HTMLTextAreaElement>) {
+    if ((event.metaKey || event.ctrlKey) && event.key === "Enter") {
+      event.preventDefault();
+      if (canSubmit) {
+        formRef.current?.requestSubmit();
+      }
+    }
+  }
+
   return (
     <div className="space-y-6">
-      <form onSubmit={onSubmit} className="space-y-4">
+      <form ref={formRef} onSubmit={onSubmit} className="space-y-4">
         <ExampleChips onSelect={setText} disabled={loading} />
 
         <div className="space-y-2">
@@ -95,16 +127,27 @@ export function PredictForm() {
             id="predict-input"
             value={text}
             onChange={(event) => setText(event.target.value)}
+            onKeyDown={onKeyDown}
             placeholder="Enter text to classify..."
             className="min-h-[120px] resize-none border-zinc-800 bg-zinc-900/40 text-zinc-100 placeholder:text-zinc-600 focus-visible:ring-zinc-700"
             disabled={loading}
             maxLength={MAX_CHARS + 100}
+            aria-describedby="predict-input-help"
           />
-          <div
-            className={cn("text-right text-xs tabular-nums", charColor)}
-            aria-live="polite"
-          >
-            {text.length.toLocaleString()} / {MAX_CHARS.toLocaleString()}
+          <div className="flex flex-wrap items-center justify-between gap-2 text-xs">
+            <span id="predict-input-help" className="flex items-center gap-1 text-zinc-600">
+              <kbd className="rounded border border-zinc-800 bg-zinc-900 px-1.5 py-0.5 font-mono text-[10px] text-zinc-400">
+                ⌘
+              </kbd>
+              <span aria-hidden>+</span>
+              <kbd className="rounded border border-zinc-800 bg-zinc-900 px-1.5 py-0.5 font-mono text-[10px] text-zinc-400">
+                Enter
+              </kbd>
+              <span className="pl-1">to submit</span>
+            </span>
+            <span className={cn("tabular-nums", charColor)} aria-live="polite">
+              {text.length.toLocaleString()} / {MAX_CHARS.toLocaleString()}
+            </span>
           </div>
         </div>
 
