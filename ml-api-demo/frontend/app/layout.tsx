@@ -1,5 +1,8 @@
 import type { Metadata } from "next";
 import localFont from "next/font/local";
+
+import { Toaster } from "@/components/ui/toaster";
+
 import "./globals.css";
 
 const geistSans = localFont({
@@ -15,8 +18,8 @@ const geistMono = localFont({
 });
 
 export const metadata: Metadata = {
-  title: "ML Inference Demo",
-  description: "Real-time sentiment analysis powered by DistilBERT.",
+  title: "Sentiment Inference Demo",
+  description: "ML model deployment showcase",
 };
 
 export default function RootLayout({
@@ -30,6 +33,7 @@ export default function RootLayout({
         className={`${geistSans.variable} ${geistMono.variable} bg-zinc-950 text-zinc-100 font-sans antialiased`}
       >
         {children}
+        <Toaster />
       </body>
     </html>
   );
