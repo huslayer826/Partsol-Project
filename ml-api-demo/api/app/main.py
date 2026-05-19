@@ -1,4 +1,4 @@
-"""FastAPI application exposing health, model info, and prediction endpoints."""
+"""FastAPI application exposing health, model info, prediction, and metrics."""
 
 import logging
 import os
@@ -9,8 +9,12 @@ from typing import Annotated, AsyncIterator
 from fastapi import Depends, FastAPI, Request, status
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
+from prometheus_client import Counter, Histogram
+from prometheus_fastapi_instrumentator import Instrumentator
 
 from app.inference import DEFAULT_MODEL, ModelService, get_model_service
+from app.logging_config import configure_logging
+from app.middleware import RequestIDMiddleware
 from app.schemas import (
     ErrorResponse,
     HealthResponse,
@@ -21,12 +25,30 @@ from app.schemas import (
 )
 
 
+configure_logging()
+
 logger = logging.getLogger(__name__)
+
+
+inference_duration_seconds = Histogram(
+    "inference_duration_seconds",
+    "Latency of model inference in seconds.",
+    labelnames=("model_name",),
+)
+
+model_load_failures_total = Counter(
+    "model_load_failures_total",
+    "Total number of times the model failed to load.",
+)
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncIterator[None]:
-    get_model_service()
+    try:
+        get_model_service()
+    except Exception:
+        model_load_failures_total.inc()
+        raise
     yield
 
 
@@ -35,6 +57,13 @@ app = FastAPI(
     version="1.0.0",
     lifespan=lifespan,
 )
+
+# Register the Prometheus middleware first so it observes every downstream
+# request, then RequestIDMiddleware (outside CORS) so X-Request-ID lands on
+# every response, including CORS preflights.
+Instrumentator().instrument(app).expose(app)
+
+app.add_middleware(RequestIDMiddleware)
 
 app.add_middleware(
     CORSMiddleware,
@@ -98,7 +127,9 @@ def predict(req: PredictRequest, service: ModelServiceDep) -> PredictResponse:
     texts = req.as_list()
     start = time.perf_counter()
     raw = service.predict(texts)
-    elapsed_ms = (time.perf_counter() - start) * 1000.0
+    elapsed = time.perf_counter() - start
+    inference_duration_seconds.labels(model_name=service.model_name).observe(elapsed)
+    elapsed_ms = elapsed * 1000.0
     predictions = [Prediction(label=r["label"], score=r["score"]) for r in raw]
     return PredictResponse(
         predictions=predictions,
