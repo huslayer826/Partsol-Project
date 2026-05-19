@@ -1,2 +1,66 @@
-# docker-compose for ml-api-demo. Services are wired up as the project evolves.
 services:
+  api:
+    build:
+      context: .
+      dockerfile: api/Dockerfile
+      args:
+        MODEL_NAME: ${MODEL_NAME:-distilbert-base-uncased-finetuned-sst-2-english}
+    environment:
+      - MODEL_NAME=${MODEL_NAME:-distilbert-base-uncased-finetuned-sst-2-english}
+      - WORKERS=${WORKERS:-4}
+      - LOG_LEVEL=${LOG_LEVEL:-INFO}
+      - ENVIRONMENT=${ENVIRONMENT:-production}
+    expose:
+      - "8000"
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/health').read()"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 60s
+    networks:
+      - mlnet
+    restart: unless-stopped
+
+  frontend:
+    build:
+      context: .
+      dockerfile: frontend/Dockerfile
+    expose:
+      - "3000"
+    # 127.0.0.1, not localhost: Next.js binds IPv4-only on 0.0.0.0 and
+    # busybox wget on Alpine doesn't reliably fall back from ::1 to 127.0.0.1.
+    healthcheck:
+      test: ["CMD", "wget", "--quiet", "--tries=1", "--spider", "http://127.0.0.1:3000/"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+    networks:
+      - mlnet
+    restart: unless-stopped
+
+  nginx:
+    build:
+      context: .
+      dockerfile: nginx/Dockerfile
+    ports:
+      - "80:80"
+    depends_on:
+      api:
+        condition: service_healthy
+      frontend:
+        condition: service_healthy
+    # Same IPv4 forcing as frontend; nginx.conf only listens on IPv4.
+    healthcheck:
+      test: ["CMD", "wget", "--quiet", "--tries=1", "--spider", "http://127.0.0.1/"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+    networks:
+      - mlnet
+    restart: unless-stopped
+
+networks:
+  mlnet:
+    driver: bridge
